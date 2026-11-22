@@ -1,0 +1,21 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "framework": null,
+  "outputDirectory": "public",
+  "rewrites": [
+    { "source": "/share", "destination": "/index.html" },
+    { "source": "/mcp", "destination": "/api/relay?relay_route=/mcp" },
+    { "source": "/api/:action(signup|login|logout|session)", "destination": "/api/relay?relay_route=/api/:action" },
+    { "source": "/api/:group(owner|agent)/:action", "destination": "/api/relay?relay_route=/api/:group/:action" }
+  ],
+  "headers": [
+    {
+      "source": "/:path*",
+      "headers": [
+        { "key": "Referrer-Policy", "value": "no-referrer" },
+        { "key": "X-Content-Type-Options", "value": "nosniff" },
+        { "key": "Content-Security-Policy", "value": "default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'" }
+      ]
+    }
+  ]
+}
