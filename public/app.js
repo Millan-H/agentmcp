@@ -8,6 +8,8 @@ let shareCode;
 const date = new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' });
 const stamp = (value) => date.format(new Date(value));
 const pageSize = 50;
+const inviteStorage = 'relayroom.invitation';
+const allTabs = ['access', 'people', 'audit'];
 
 function element(tag, text, className) {
   const node = document.createElement(tag);
@@ -60,6 +62,7 @@ function setUser(user) {
   show($('transcript'), false);
   show($('room-panel'), false);
   show($('empty-workspace'), Boolean(user));
+  notice($('account-notice'));
   if (user) {
     $('account-email').textContent = user.email;
     $('account-icon').textContent = user.email[0].toUpperCase();
@@ -107,17 +110,34 @@ function listRooms(rooms, selected) {
 }
 
 async function openWorkspace(user) {
+  let joined;
+  let inviteError;
+  const invitation = sessionStorage.getItem(inviteStorage);
+  if (invitation) {
+    try {
+      joined = await owner('accept_invite', { invitation });
+      sessionStorage.removeItem(inviteStorage);
+    } catch (error) {
+      if ([400, 403, 404].includes(error.status)) sessionStorage.removeItem(inviteStorage);
+      inviteError = error.message;
+    }
+  }
   const rooms = await owner('rooms');
   setUser(user);
-  if (rooms.length) await selectRoom(rooms, rooms[0]);
+  if (rooms.length) await selectRoom(rooms, rooms.find((room) => room.id === joined?.id) ?? rooms[0]);
   else listRooms(rooms);
+  if (inviteError) notice($('account-notice'), inviteError, true);
+  else if (joined?.role === 'member') notice($('account-notice'), `Joined ${joined.name}.`);
 }
 
 async function selectRoom(rooms, room) {
   const scope = { room, messages: [], audit: [], query: '', moreMessages: false, moreAudit: false };
+  const canManage = room.role !== 'member';
   current = scope;
   listRooms(rooms, room.id);
   $('room-title').textContent = room.name;
+  $('room-caption').textContent = canManage ? 'Private room' : 'Shared room';
+  show($('new-agent'), canManage);
   $('mcp-toggle').checked = room.mcp_enabled;
   $('search-form').reset();
   $('post-form').reset();
@@ -125,14 +145,18 @@ async function selectRoom(rooms, room) {
   $('agent-count').textContent = '';
   $('messages').replaceChildren();
   $('audit').replaceChildren();
+  $('members').replaceChildren();
+  $('invites').replaceChildren();
   show($('older-messages'), false);
   show($('older-audit'), false);
-  selectTab('access');
+  selectTab(canManage ? 'access' : 'audit');
   notice($('workspace-notice'));
   show($('empty-workspace'), false);
   show($('transcript'));
   show($('room-panel'));
-  try { await Promise.all([loadMessages(scope, 'initial'), loadAgents(scope)]); }
+  const requests = [loadMessages(scope, 'initial')];
+  if (canManage) requests.push(loadAgents(scope));
+  try { await Promise.all(requests); }
   catch (error) { if (current === scope) notice($('workspace-notice'), error.message, true); }
 }
 
@@ -156,7 +180,7 @@ function renderMessages(scope) {
     row.append(avatar, content);
     return row;
   });
-  if (!nodes.length) nodes.push(element('p', scope.query ? 'No messages match this search.' : 'No messages yet. Issue a code or write the first message.', 'empty-transcript'));
+  if (!nodes.length) nodes.push(element('p', scope.query ? 'No messages match this search.' : 'No messages yet. Write the first message.', 'empty-transcript'));
   $('messages').replaceChildren(...nodes);
   show($('older-messages'), scope.moreMessages);
 }
@@ -199,7 +223,17 @@ async function loadAgents(scope) {
     card.append(heading, element('p', agent.status === 'active' ? rights || 'No message access' : 'Room access removed'));
     if (agent.status !== 'blocked') {
       const actions = element('div', undefined, 'agent-actions');
-      if (agent.status === 'active') actions.append(actionButton('Edit access', () => openAgent(agent)));
+      if (agent.status === 'active') {
+        if (agent.can_recover) actions.append(actionButton('View code', async () => {
+          const { code } = await owner('view_code', { room_id: scope.room.id, agent_id: agent.id });
+          if (current !== scope || $('agent-dialog').open) return;
+          showCode(code, `Code for ${agent.name}`);
+          $('agent-dialog').showModal();
+          $('copy-code').focus();
+        }));
+        else card.append(element('p', 'Revoke and reissue this code to enable recovery.'));
+        actions.append(actionButton('Edit access', () => openAgent(agent)));
+      }
       else actions.append(actionButton('Reissue code', () => openAgent(agent)));
       for (const action of agent.status === 'active' ? ['revoke', 'block'] : ['block']) {
         actions.append(actionButton(action === 'revoke' ? 'Revoke' : 'Block', async () => {
@@ -215,8 +249,39 @@ async function loadAgents(scope) {
   $('agents').replaceChildren(...(cards.length ? cards : [element('p', 'No agent codes issued yet.', 'muted')]));
 }
 
+async function loadPeople(scope) {
+  const { members, invites } = await owner('people', { room_id: scope.room.id });
+  if (current !== scope) return;
+  const memberCards = members.map((member) => {
+    const card = element('article', undefined, 'agent-card');
+    const label = member.email ?? 'Room member';
+    const actions = element('div', undefined, 'agent-actions');
+    actions.append(actionButton('Remove', async () => {
+      if (!window.confirm(`Remove ${label} from this room? Their messages will stay in the transcript.`)) return;
+      await owner('remove_member', { room_id: scope.room.id, member_id: member.id });
+      await loadPeople(scope);
+    }));
+    card.append(element('strong', label), element('p', `Joined ${stamp(member.joined_at)}`), actions);
+    return card;
+  });
+  const inviteCards = invites.map((invite) => {
+    const card = element('article', undefined, 'agent-card');
+    const actions = element('div', undefined, 'agent-actions');
+    actions.append(actionButton('Revoke invite', async () => {
+      await owner('revoke_invite', { room_id: scope.room.id, invite_id: invite.id });
+      await loadPeople(scope);
+    }));
+    card.append(element('strong', `Expires ${stamp(invite.expires_at)}`), element('p', `Created ${stamp(invite.created_at)}`), actions);
+    return card;
+  });
+  $('members').replaceChildren(...(memberCards.length ? memberCards : [element('p', 'No other members yet.', 'muted')]));
+  $('invites').replaceChildren(...(inviteCards.length ? inviteCards : [element('p', 'No pending invites.', 'muted')]));
+}
+
 const auditLabels = {
   create_room: 'Created room', issue_code: 'Issued code', rotate_code: 'Reissued code', configure_agent: 'Changed agent permissions',
+  view_code: 'Opened code recovery',
+  create_invite: 'Created a room invite', accept_invite: 'Joined the room', revoke_invite: 'Revoked a room invite', remove_member: 'Removed a member',
   revoke_agent: 'Revoked code', block_agent: 'Blocked agent', configure_room: 'Changed MCP access',
   join: 'Opened room', pull: 'Read messages', search: 'Searched messages', post: 'Posted a message',
 };
@@ -235,7 +300,7 @@ async function loadAudit(scope, mode) {
     const row = element('article', undefined, 'audit-row');
     const info = [event.actor, { mcp: 'MCP', http: 'HTTP', website: 'Website' }[event.channel], stamp(event.created_at)];
     const details = event.details;
-    const summary = [details.name, details.status, details.returned === undefined ? null : `${details.returned} result(s)`,
+    const summary = [details.name, details.member, details.status, details.returned === undefined ? null : `${details.returned} result(s)`,
       details.query && `Search “${details.query}”`,
       details.message_id && `Message ${details.message_id}`,
       details.mcp_enabled === undefined ? null : `MCP ${details.mcp_enabled ? 'enabled' : 'disabled'}`,
@@ -253,14 +318,22 @@ async function loadAudit(scope, mode) {
   show($('older-audit'), scope.moreAudit);
 }
 
+function availableTabs() {
+  return current?.room.role === 'member' ? ['audit'] : allTabs;
+}
+
 function selectTab(tab) {
-  for (const name of ['access', 'audit']) {
+  const tabs = availableTabs();
+  for (const name of allTabs) {
     const active = name === tab;
+    show($(`${name}-tab`), tabs.includes(name));
     $(`${name}-tab`).setAttribute('aria-selected', String(active));
     $(`${name}-tab`).tabIndex = active ? 0 : -1;
     show($(`${name}-panel`), active);
   }
-  if (tab === 'audit') loadAudit(current, 'new').catch((error) => notice($('workspace-notice'), error.message, true));
+  const scope = current;
+  const request = tab === 'audit' ? loadAudit(scope, 'new') : tab === 'people' ? loadPeople(scope) : null;
+  request?.catch((error) => { if (current === scope) notice($('workspace-notice'), error.message, true); });
 }
 
 function openRoomDialog() {
@@ -287,16 +360,17 @@ function openAgent(agent) {
   $('agent-dialog').showModal();
 }
 
-async function copy(value, label) {
+async function copy(value, label, feedback = $('copy-notice')) {
   try {
     await navigator.clipboard.writeText(value);
-    notice($('copy-notice'), `${label} copied.`);
+    notice(feedback, `${label} copied.`);
   } catch {
-    notice($('copy-notice'), `Copy this ${label.toLowerCase()} manually. ${value}`);
+    notice(feedback, `Copy this ${label.toLowerCase()} manually. ${value}`);
   }
 }
 
-function issueView(code) {
+function showCode(code, title) {
+  $('credential-title').textContent = title;
   $('code-output').value = code;
   notice($('copy-notice'));
   $('agent-dialog').setAttribute('aria-labelledby', 'credential-title');
@@ -328,6 +402,8 @@ if (location.pathname === '/share') {
   }, $('share-notice'));
   if (code) openShare(code).catch((error) => notice($('share-notice'), error.message, true));
 } else {
+  const invitation = new URLSearchParams(location.hash.slice(1)).get('invite');
+  if (invitation) sessionStorage.setItem(inviteStorage, invitation);
   if (location.hash) history.replaceState(null, '', location.pathname);
   $('auth-switch').addEventListener('click', () => {
     signup = !signup;
@@ -343,10 +419,12 @@ if (location.pathname === '/share') {
       form.reset();
       await openWorkspace(result.user);
     } else if (result.confirmationRequired) {
-      notice($('auth-notice'), 'Check your email to confirm your account, then sign in.');
+      notice($('auth-notice'), sessionStorage.getItem(inviteStorage)
+        ? 'Confirm your email, then return to this tab to sign in and join the room.'
+        : 'Check your email to confirm your account, then sign in.');
     }
   }, $('auth-notice'));
-  bindButton($('logout'), async () => { await api('logout'); setUser(null); });
+  bindButton($('logout'), async () => { await api('logout'); setUser(null); }, $('account-notice'));
   for (const id of ['new-room', 'first-room']) $(id).addEventListener('click', openRoomDialog);
   $('new-agent').addEventListener('click', () => openAgent());
   for (const button of document.querySelectorAll('[data-close]')) button.addEventListener('click', () => button.closest('dialog').close());
@@ -354,6 +432,17 @@ if (location.pathname === '/share') {
     if (dialog.querySelector('form:not([hidden]) .primary:disabled')) event.preventDefault();
   });
   $('agent-dialog').addEventListener('close', () => { $('code-output').value = ''; notice($('copy-notice')); });
+  $('invite-dialog').addEventListener('close', () => { $('invite-output').value = ''; notice($('invite-notice')); });
+  bindButton($('new-invite'), async () => {
+    const scope = current;
+    const { invitation: token } = await owner('create_invite', { room_id: scope.room.id });
+    if (current !== scope) return;
+    $('invite-output').value = `${location.origin}/#invite=${encodeURIComponent(token)}`;
+    $('invite-dialog').showModal();
+    $('copy-invite').focus();
+    await loadPeople(scope);
+  });
+  $('copy-invite').addEventListener('click', () => copy($('invite-output').value, 'Invite link', $('invite-notice')));
   bindForm('room-form', async (_, data) => {
     const room = await owner('create_room', data);
     const rooms = await owner('rooms');
@@ -366,7 +455,7 @@ if (location.pathname === '/share') {
       room_id: scope.room.id, agent_id: form.dataset.agent, name: data.name,
       can_read: form.elements.can_read.checked, can_post: form.elements.can_post.checked,
     });
-    if (result.code) issueView(result.code);
+    if (result.code) showCode(result.code, 'Agent code created');
     else $('agent-dialog').close();
     await loadAgents(scope).catch((error) => notice($('workspace-notice'), error.message, true));
   }, $('agent-form').querySelector('.notice'));
@@ -403,12 +492,14 @@ if (location.pathname === '/share') {
       toggle.disabled = false;
     }
   });
-  for (const tab of ['access', 'audit']) {
+  for (const tab of allTabs) {
     $(`${tab}-tab`).addEventListener('click', () => selectTab(tab));
     $(`${tab}-tab`).addEventListener('keydown', (event) => {
       if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
       event.preventDefault();
-      const next = event.key === 'Home' ? 'access' : event.key === 'End' ? 'audit' : tab === 'access' ? 'audit' : 'access';
+      const tabs = availableTabs();
+      const offset = event.key === 'ArrowLeft' ? -1 : 1;
+      const next = event.key === 'Home' ? tabs[0] : event.key === 'End' ? tabs.at(-1) : tabs[(tabs.indexOf(tab) + offset + tabs.length) % tabs.length];
       selectTab(next);
       $(`${next}-tab`).focus();
     });
@@ -422,10 +513,18 @@ if (location.pathname === '/share') {
     if (!$('audit-panel').hidden) requests.push(loadAudit(scope, 'new'));
     const results = await Promise.allSettled(requests);
     const failure = results.find((result) => result.status === 'rejected');
-    if (failure && current === scope) notice($('workspace-notice'), failure.reason.message, true);
+    if (failure && current === scope) {
+      if (failure.reason.status === 404 && scope.room.role === 'member') {
+        await openWorkspace(account).then(() => notice($('account-notice'), 'Your access to the room ended.')).catch((error) => notice($('workspace-notice'), error.message, true));
+      } else notice($('workspace-notice'), failure.reason.message, true);
+    }
     polling = false;
   }, 7000);
-  session().then(({ user }) => user ? openWorkspace(user) : setUser(null)).catch((error) => {
+  session().then(({ user }) => {
+    if (user) return openWorkspace(user);
+    setUser(null);
+    if (sessionStorage.getItem(inviteStorage)) notice($('auth-notice'), 'Sign in or create an account to join the invited room.');
+  }).catch((error) => {
     setUser(null);
     notice($('auth-notice'), error.message, true);
   });

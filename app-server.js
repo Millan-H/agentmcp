@@ -6,6 +6,7 @@ import { currentMcpVersion, handleMcp, mcpHeaderError } from './mcp.js';
 const assets = {
   '/': ['index.html', 'text/html; charset=utf-8'],
   '/share': ['index.html', 'text/html; charset=utf-8'],
+  '/docs': ['docs.txt', 'text/plain; charset=utf-8'],
   '/app.js': ['app.js', 'text/javascript; charset=utf-8'],
   '/style.css': ['style.css', 'text/css; charset=utf-8'],
 };
@@ -66,6 +67,7 @@ export function configFromEnv(env) {
     supabaseUrl: env.SUPABASE_URL || env.NEXT_PUBLIC_SUPABASE_URL,
     publishableKey: env.SUPABASE_PUBLISHABLE_KEY || env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY || env.SUPABASE_ANON_KEY || env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
     secretKey: env.SUPABASE_SECRET_KEY || env.SUPABASE_SERVICE_ROLE_KEY,
+    codeRecoveryKey: env.RELAYROOM_CODE_KEY,
     publicUrl: env.PUBLIC_URL,
     vercel,
     vercelOrigins: vercel ? [env.VERCEL_URL, env.VERCEL_BRANCH_URL, env.VERCEL_PROJECT_PRODUCTION_URL]
@@ -110,7 +112,7 @@ export function createHandler(config, fetcher = fetch) {
   const supabase = supabaseClient(config, fetcher);
   const { agent, owner } = createOperations((name, args, token) => supabase(`/rest/v1/rpc/${name}`, {
     data: args, token, privileged: name === 'relayroom_agent',
-  }));
+  }), config);
 
   return async (req, res, route) => {
     res.setHeader('Cache-Control', 'no-store');

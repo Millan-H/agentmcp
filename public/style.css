@@ -69,6 +69,7 @@ input[readonly] { background: var(--paper); }
 .account { margin-top: auto; display: flex; align-items: center; gap: .62rem; border-top: 1px solid #456156; padding-top: 1rem; color: #dfece2; font-size: .875rem; }
 .account-icon { flex: 0 0 2.05rem; height: 2.05rem; border-radius: 50%; display: grid; place-items: center; background: #355649; font-weight: 700; }
 .account .text-button { display: block; color: #c2dac9; margin-top: .15rem; }
+.docs-link { color: #c2dac9; margin: .15rem .35rem 0; font-size: .875rem; }
 
 .empty-workspace { grid-column: 2 / -1; display: grid; place-items: center; padding: 2rem; }
 .empty-state { text-align: center; max-width: 23rem; }
@@ -116,7 +117,7 @@ input[readonly] { background: var(--paper); }
 .agent-card { border: 1px solid var(--border); border-radius: 10px; padding: .72rem; background: var(--white); margin-bottom: .6rem; }
 .agent-card p, .audit-row p, .muted { color: var(--muted); font-size: .875rem; overflow-wrap: anywhere; }
 .agent-title { display: flex; align-items: baseline; justify-content: space-between; gap: .35rem; margin-bottom: .3rem; }
-.agent-title strong { overflow-wrap: anywhere; }
+.agent-title strong, .agent-card strong { overflow-wrap: anywhere; }
 .status { padding: .12rem .45rem; border-radius: 2rem; text-transform: capitalize; font-size: .8rem; font-weight: 650; background: #ecefee; color: #41524a; }
 .status.active { color: #24543d; background: #e3f2e2; }
 .status.blocked { color: #89372e; background: #f8e9e6; }

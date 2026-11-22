@@ -7,6 +7,7 @@ import { configFromEnv, createApp } from './app-server.js';
 import vercelHandler from './api/relay.js';
 
 const roomId = 'fc4c4a41-6aea-45b3-a7a9-08ee0a6bab34';
+const agentId = 'ea2a05da-ab47-4a85-a91a-eac0aed89f2e';
 const config = { supabaseUrl: 'https://db.example', publishableKey: 'sb_publishable_test', secretKey: 'sb_secret_test' };
 
 const start = (t, backend, options = config) => listen(t, createApp(options, backend));
@@ -162,6 +163,78 @@ test('the Vercel function dispatches the original and rewritten MCP URLs', async
   const session = await app.post('/api/relay?relay_route=%2Fapi%2Fsession', {});
   assert.deepEqual(await session.json(), { user: null });
   assert.equal((await fetch(`${app.origin}/api/relay?relay_route=/schema.sql`)).status, 404);
+});
+
+test('recover an active agent code through the owner route without storing it in plaintext', async (t) => {
+  let stored;
+  const app = await start(t, async (_, request) => {
+    const { p_action, p_room, p_data } = JSON.parse(request.body);
+    assert.equal(p_room, roomId);
+    if (request.headers.Authorization === 'Bearer member') {
+      return Response.json({ code: 'PT404', message: 'Room not found.' }, { status: 404 });
+    }
+    if (p_action === 'issue_code') {
+      stored = { code_hash: p_data.code_hash, sealed_code: p_data.sealed_code };
+      return Response.json({ id: agentId, can_recover: true });
+    }
+    assert.equal(p_action, 'view_code');
+    assert.equal(p_data.agent_id, agentId);
+    return Response.json(stored);
+  }, { ...config, codeRecoveryKey: '7'.repeat(64) });
+
+  const owner = { Cookie: 'rl_access=owner' };
+  const issue = await app.post('/api/owner/issue_code', { room_id: roomId, name: 'Worker', can_read: true, can_post: true }, owner);
+  const { code } = await issue.json();
+  assert.equal(stored.code_hash, digest(code));
+  assert.match(stored.sealed_code, /^v1\.dedicated\./);
+  assert.ok(!stored.sealed_code.includes(code));
+  const request = { room_id: roomId, agent_id: agentId };
+  const retrieve = await app.post('/api/owner/view_code', request, owner);
+  assert.equal(retrieve.headers.get('Cache-Control'), 'no-store');
+  assert.deepEqual(await retrieve.json(), { code });
+  assert.equal((await app.post('/api/owner/view_code', request, { Cookie: 'rl_access=member' })).status, 404);
+  assert.equal((await app.post('/api/owner/view_code', request)).status, 401);
+  stored.code_hash = 'f'.repeat(64);
+  assert.equal((await app.post('/api/owner/view_code', request, owner)).status, 409);
+});
+
+test('issue and accept a human invite through authenticated routes', async (t) => {
+  let invitationHash;
+  const app = await start(t, async (_, request) => {
+    const { p_action, p_room, p_data } = JSON.parse(request.body);
+    if (p_action === 'create_invite') {
+      assert.equal(request.headers.Authorization, 'Bearer owner');
+      assert.equal(p_room, roomId);
+      invitationHash = p_data.token_hash;
+      return Response.json({ id: 'invite-id' });
+    }
+    assert.equal(p_action, 'accept_invite');
+    assert.equal(request.headers.Authorization, 'Bearer guest');
+    assert.equal(p_room, null);
+    assert.deepEqual(p_data, { token_hash: invitationHash });
+    return Response.json({ id: roomId, role: 'member' });
+  });
+  const issued = await app.post('/api/owner/create_invite', { room_id: roomId }, { Cookie: 'rl_access=owner' });
+  const { invitation } = await issued.json();
+  assert.match(invitation, /^ri_[A-Za-z0-9_-]{43}$/);
+  assert.equal(digest(invitation), invitationHash);
+  const accepted = await app.post('/api/owner/accept_invite', { invitation }, { Cookie: 'rl_access=guest' });
+  assert.deepEqual(await accepted.json(), { id: roomId, role: 'member' });
+  assert.equal((await app.post('/api/owner/accept_invite', { invitation })).status, 401);
+});
+
+test('serve public instructions on both the local and Vercel routes', async (t) => {
+  const app = await start(t, () => { throw new Error('Docs must not use Supabase.'); });
+  const docs = await fetch(`${app.origin}/docs`);
+  assert.equal(docs.status, 200);
+  assert.match(docs.headers.get('Content-Type'), /^text\/plain/);
+  const instructions = await docs.text();
+  assert.match(instructions, /POST \/api\/agent\/post/);
+  assert.match(instructions, /search_messages/);
+  const { readFile } = await import('node:fs/promises');
+  const vercel = JSON.parse(await readFile(new URL('./vercel.json', import.meta.url), 'utf8'));
+  const rewrite = vercel.rewrites.find(({ source }) => source === '/docs');
+  assert.equal(await readFile(new URL(`./public${rewrite.destination}`, import.meta.url), 'utf8'), instructions);
 });
 
 test('Vercel reads integration variables, restricts browser origins, and sets Secure cookies', async (t) => {

@@ -4,6 +4,7 @@
   "outputDirectory": "public",
   "rewrites": [
     { "source": "/share", "destination": "/index.html" },
+    { "source": "/docs", "destination": "/docs.txt" },
     { "source": "/mcp", "destination": "/api/relay?relay_route=/mcp" },
     { "source": "/api/:action(signup|login|logout|session)", "destination": "/api/relay?relay_route=/api/:action" },
     { "source": "/api/:group(owner|agent)/:action", "destination": "/api/relay?relay_route=/api/:group/:action" }

@@ -33,6 +33,8 @@
       <div class="brand"><span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i></span>Relayroom</div>
       <div class="rooms-header"><h2>Your rooms</h2><button class="icon-button side-add" id="new-room" title="New room" aria-label="New room">+</button></div>
       <nav id="rooms" class="room-list" aria-label="Your rooms"></nav>
+      <p id="account-notice" class="notice" role="status" hidden></p>
+      <a class="text-button docs-link" href="/docs" target="_blank" rel="noopener">Agent usage instructions</a>
       <div class="account"><span class="account-icon" id="account-icon" aria-hidden="true"></span><div><span id="account-email"></span><button id="logout" type="button" class="text-button">Sign out</button></div></div>
     </aside>
     <main id="empty-workspace" class="empty-workspace" hidden>
@@ -40,7 +42,7 @@
     </main>
     <main id="transcript" class="transcript" hidden>
       <header class="room-heading">
-        <div class="title-line"><span class="room-mark" aria-hidden="true">#</span><div><h1 id="room-title"></h1><p>Private room</p></div></div>
+        <div class="title-line"><span class="room-mark" aria-hidden="true">#</span><div><h1 id="room-title"></h1><p id="room-caption">Private room</p></div></div>
         <button class="button primary" id="new-agent">+ Issue code</button>
       </header>
       <div class="transcript-toolbar"><h2>Transcript</h2><form id="search-form" role="search"><label class="sr-only" for="search">Search messages</label><input id="search" type="search" placeholder="Search messages" maxlength="200"><button class="button small" type="submit">Search</button></form></div>
@@ -52,15 +54,21 @@
       <form id="post-form" class="composer"><label class="sr-only" for="owner-message">Message</label><textarea id="owner-message" name="body" rows="2" maxlength="8000" placeholder="Write a message…" required></textarea><button class="button primary" type="submit">Send message</button></form>
     </main>
     <aside id="room-panel" class="room-panel" aria-label="Room controls" hidden>
-      <div class="panel-heading"><h2>Room controls</h2><p>Manage access and inspect activity.</p></div>
+      <div class="panel-heading"><h2>Room activity</h2></div>
       <div class="tabs" role="tablist" aria-label="Room controls">
         <button type="button" id="access-tab" role="tab" aria-controls="access-panel" aria-selected="true">Access</button>
+        <button type="button" id="people-tab" role="tab" aria-controls="people-panel" aria-selected="false" tabindex="-1">People</button>
         <button type="button" id="audit-tab" role="tab" aria-controls="audit-panel" aria-selected="false" tabindex="-1">Audit log</button>
       </div>
       <section class="panel-content" id="access-panel" role="tabpanel" aria-labelledby="access-tab">
         <label class="setting"><span><strong>MCP access</strong><small>Allow agents to use the MCP endpoint.</small></span><input type="checkbox" id="mcp-toggle" role="switch"></label>
         <h3 class="agent-heading">Agent codes <span id="agent-count"></span></h3>
         <div id="agents"></div>
+      </section>
+      <section class="panel-content" id="people-panel" role="tabpanel" aria-labelledby="people-tab" hidden>
+        <button class="button primary" id="new-invite" type="button">Create invite link</button>
+        <h3 class="agent-heading">Members</h3><div id="members"></div>
+        <h3 class="agent-heading">Pending invites</h3><div id="invites"></div>
       </section>
       <section class="panel-content" id="audit-panel" role="tabpanel" aria-labelledby="audit-tab" hidden>
         <div id="audit"></div><button class="button small" id="older-audit" hidden>Load older events</button>
@@ -84,7 +92,10 @@
   </dialog>
   <dialog id="agent-dialog" aria-labelledby="agent-dialog-title">
     <form id="agent-form" class="form-stack"><h2 id="agent-dialog-title">Issue an agent code</h2><p>Use one code per agent so you can manage its access and track its activity.</p><label>Agent name<input name="name" maxlength="80" required></label><div class="permissions"><label><input name="can_read" type="checkbox" checked> Read and search</label><label><input name="can_post" type="checkbox" checked> Post messages</label></div><p class="notice" role="status" hidden></p><div class="dialog-buttons"><button type="button" class="button" data-close>Cancel</button><button class="button primary">Generate code</button></div></form>
-    <section id="credential" class="form-stack" hidden><h2 id="credential-title">Agent code created</h2><p>Copy the code or link now. You’ll only see the code here once.</p><label>Private code<input id="code-output" readonly autocomplete="off"></label><div class="copy-actions"><button type="button" class="button" id="copy-code">Copy code</button><button type="button" class="button" id="copy-link">Copy posting link</button><button type="button" class="button" id="copy-mcp">Copy MCP URL</button></div><p class="notice" id="copy-notice" role="status" hidden></p><div class="dialog-buttons"><button type="button" class="button primary" data-close>Done</button></div></section>
+    <section id="credential" class="form-stack" hidden><h2 id="credential-title">Agent code created</h2><p>You can reopen this code from the agent’s card while it is active.</p><label>Private code<input id="code-output" readonly autocomplete="off"></label><div class="copy-actions"><button type="button" class="button" id="copy-code">Copy code</button><button type="button" class="button" id="copy-link">Copy posting link</button><button type="button" class="button" id="copy-mcp">Copy MCP URL</button></div><a class="text-button" href="/docs" target="_blank" rel="noopener">Agent usage instructions</a><p class="notice" id="copy-notice" role="status" hidden></p><div class="dialog-buttons"><button type="button" class="button primary" data-close>Done</button></div></section>
+  </dialog>
+  <dialog id="invite-dialog" aria-labelledby="invite-dialog-title">
+    <section class="form-stack"><h2 id="invite-dialog-title">Invite a person</h2><p>Share this link with one person. They must sign in to join. The link expires after 7 days.</p><label>Invite link<input id="invite-output" readonly autocomplete="off"></label><p id="invite-notice" class="notice" role="status" hidden></p><div class="dialog-buttons"><button type="button" class="button" data-close>Done</button><button type="button" class="button primary" id="copy-invite">Copy invite link</button></div></section>
   </dialog>
 </body>
 </html>
